@@ -1,0 +1,52 @@
+version: '3'
+services:
+  # FastAPI Application
+  app:
+    build:
+      context: .
+    ports:
+      - "8000:8000"
+    depends_on:
+      - localstack
+      - redis
+    environment:
+      - DYNAMODB_ENDPOINT=http://localstack:4566
+      - S3_ENDPOINT=http://localstack:4572
+      - REDIS_HOST=redis
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  # Celery Worker
+  celery_worker:
+    build:
+      context: .
+    depends_on:
+      - app
+    environment:
+      - REDIS_HOST=redis
+    command: celery -A app.main.celery worker --loglevel=info
+    working_dir: /app
+
+  # Redis for Celery
+  redis:
+    image: redis:latest
+    container_name: redis
+    ports:
+      - "6379:6379"
+
+  # LocalStack for S3 and DynamoDB
+  localstack:
+    image: localstack/localstack
+    container_name: localstack
+    environment:
+      - SERVICES=s3,dynamodb
+      - DEBUG=1
+      - DATA_DIR=/tmp/localstack/data
+      - DEFAULT_REGION=us-east-1
+    ports:
+      - "4566:4566"
+      - "4572:4572"
+      - "8055:8080"
+    volumes:
+      - "${TMPDIR:-/tmp/localstack}:/tmp/localstack"
+      - /var/run/docker.sock:/var/run/docker.sock  # Mount Docker socket
+
