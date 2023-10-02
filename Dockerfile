@@ -19,4 +19,4 @@ ENV DYNAMODB_ENDPOINT=http://localstack:4566
 ENV S3_ENDPOINT=http://localstack:4572
 
 # Run main.py when the container launches
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
