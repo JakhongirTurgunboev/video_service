@@ -17,7 +17,6 @@ services:
 
   - name: celery-worker
     type: worker
-    dockerfile: Dockerfile
     env:
       - key: REDIS_HOST
         value: redis
