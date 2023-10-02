@@ -5,46 +5,41 @@ from datetime import datetime
 from botocore.exceptions import ClientError
 from celery import Celery
 from fastapi import FastAPI, UploadFile, HTTPException
-from pydantic import BaseModel
 import boto3
 import uuid
 from moviepy.editor import VideoFileClip
-from fastapi.responses import RedirectResponse, FileResponse
+from fastapi.responses import FileResponse
+from app.utils import (
+    table_name,
+    key_schema,
+    attribute_definitions,
+    VideoInfo,
+    convert_dynamodb_item_to_video_info,
+)
 
 app = FastAPI(
     title="Video Service",
 )
 
 # Celery configuration
-celery = Celery('app.tasks', broker='redis://redis:6379')
+celery = Celery("app.tasks", broker="redis://redis:6379")
 
 # Configure S3 client
-s3 = boto3.client('s3',
-                  endpoint_url='http://localstack:4566',  # LocalStack S3 endpoint URL
-                  aws_access_key_id='test',  # Use any access key
-                  aws_secret_access_key='test',  # Use any secret key
-                  )
+s3 = boto3.client(
+    "s3",
+    endpoint_url="http://localstack:4566",  # LocalStack S3 endpoint URL
+    aws_access_key_id="test",  # Use any access key
+    aws_secret_access_key="test",  # Use any secret key
+)
 
-print(s3.list_buckets())
 # Configure DynamoDB client
 dynamodb = boto3.client(
-    'dynamodb',
-    endpoint_url='http://localstack:4566',  # Use the hostname of the LocalStack service
-    aws_access_key_id='test',               # Use the default access key ID
-    aws_secret_access_key='test',            # Use the default secret access key
-    region_name='us-west-2'
+    "dynamodb",
+    endpoint_url="http://localstack:4566",  # Use the hostname of the LocalStack service
+    aws_access_key_id="test",  # Use the default access key ID
+    aws_secret_access_key="test",  # Use the default secret access key
+    region_name="us-west-2",
 )
-print(dynamodb.list_tables())
-
-
-# Define a model for video metadata
-class VideoInfo(BaseModel):
-    video_id: str
-    name: str
-    size: int
-    length: int
-    creation_date: str
-    processing_status: str
 
 
 @app.post("/upload/")
@@ -62,33 +57,13 @@ async def upload_video(file: UploadFile):
     return {"video_id": video_id}
 
 
-# Define the table name
-table_name = 'videos_table'
-
-# Define the KeySchema and AttributeDefinitions
-key_schema = [
-    {
-        'AttributeName': 'video_id',
-        'KeyType': 'HASH'  # HASH indicates the partition key
-    }
-]
-
-attribute_definitions = [
-    {
-        'AttributeName': 'video_id',
-        'AttributeType': 'S'  # 'S' represents a string attribute
-    }
-]
 # Create the DynamoDB table
 try:
     dynamodb.create_table(
         TableName=table_name,
         KeySchema=key_schema,
         AttributeDefinitions=attribute_definitions,
-        ProvisionedThroughput={
-            'ReadCapacityUnits': 1,
-            'WriteCapacityUnits': 1
-        }
+        ProvisionedThroughput={"ReadCapacityUnits": 1, "WriteCapacityUnits": 1},
     )
     print(f"Table '{table_name}' created successfully.")
 except dynamodb.exceptions.ResourceInUseException:
@@ -101,13 +76,13 @@ def store_video_metadata(video_id, file):
         dynamodb.put_item(
             TableName=table_name,
             Item={
-                'video_id': {'S': video_id},
-                'name': {'S': file.filename},
-                'size': {'N': str(file.size)},
-                'length': {'N': str(0)},
-                'creation_date': {'S': str(creation_date)},
-                'processing_status': {'S': "processing"},
-            }
+                "video_id": {"S": video_id},
+                "name": {"S": file.filename},
+                "size": {"N": str(file.size)},
+                "length": {"N": str(0)},
+                "creation_date": {"S": str(creation_date)},
+                "processing_status": {"S": "processing"},
+            },
         )
 
         return True
@@ -121,24 +96,22 @@ def update_video_status(video_id: str, status: str, new_length: int):
     # Check if the video ID exists in the database
     response = dynamodb.update_item(
         TableName=table_name,
-        Key={
-            'video_id': {'S': video_id}
-        },
+        Key={"video_id": {"S": video_id}},
         UpdateExpression="SET processing_status = :status, #l = :new_length",
         ExpressionAttributeValues={
-            ':status': {'S': status},
-            ':new_length': {'N': str(new_length)}
+            ":status": {"S": status},
+            ":new_length": {"N": str(new_length)},
         },
-        ExpressionAttributeNames={
-          '#l': 'length'
-        },
-        ReturnValues="ALL_NEW"  # If you want to get the updated item after the update
+        ExpressionAttributeNames={"#l": "length"},
+        ReturnValues="ALL_NEW",  # If you want to get the updated item after the update
     )
 
-    updated_item = response.get('Attributes')
+    updated_item = response.get("Attributes")
 
     if updated_item is None:
-        raise HTTPException(status_code=404, detail=f"Video with ID {video_id} not found")
+        raise HTTPException(
+            status_code=404, detail=f"Video with ID {video_id} not found"
+        )
 
     print(updated_item)
 
@@ -176,33 +149,23 @@ def compress_video(video_id, original_name, file_contents):
 
 def upload_to_s3(video_id, file_path, is_compressed=False):
     try:
-        bucket_name = 'videos'
+        bucket_name = "videos"
         object_key = f'{video_id}/{"compressed_" if is_compressed else ""}video.mp4'
         # Check if the bucket already exists, create it if not
         response = s3.list_buckets()
-        buckets = [bucket['Name'] for bucket in response['Buckets']]
+        buckets = [bucket["Name"] for bucket in response["Buckets"]]
         if bucket_name not in buckets:
             s3.create_bucket(Bucket=bucket_name)
             print(f"Bucket '{bucket_name}' created successfully.")
 
         # Upload the file to S3
-        s3.upload_file(file_path, bucket_name, object_key, ExtraArgs={'ACL': 'public-read'})
+        s3.upload_file(
+            file_path, bucket_name, object_key, ExtraArgs={"ACL": "public-read"}
+        )
 
         print(f"Object '{object_key}' uploaded successfully to bucket '{bucket_name}'.")
     except Exception as e:
         print(f"An error occurred: {e}")
-
-
-# Function to convert DynamoDB response to VideoInfo
-def convert_dynamodb_item_to_video_info(item: dict) -> VideoInfo:
-    return VideoInfo(
-        video_id=item.get('video_id', {}).get('S', ''),
-        name=item.get('name', {}).get('S', ''),
-        size=int(item.get('size', {}).get('N', 0)),
-        length=int(item.get('length', {}).get('N', 0)),
-        creation_date=item.get('creation_date', {}).get('S', ''),
-        processing_status=item.get('processing_status', {}).get('S', '')
-    )
 
 
 # Get information about the source video file using video_id
@@ -213,11 +176,10 @@ async def get_video_info(video_id: str):
     try:
         # Retrieve item from DynamoDB based on video_id
         response = dynamodb.get_item(
-            TableName=table_name,
-            Key={'video_id': {'S': video_id}}
+            TableName=table_name, Key={"video_id": {"S": video_id}}
         )
         # Extract the item from the DynamoDB response
-        item = response.get('Item')
+        item = response.get("Item")
 
         # If item is found, convert it to VideoInfo and return
         if item:
@@ -226,7 +188,10 @@ async def get_video_info(video_id: str):
 
         # If item is not found, return a 404 response
         else:
-            raise HTTPException(status_code=404, detail="Video not found / Enter video id without quotes")
+            raise HTTPException(
+                status_code=404,
+                detail="Video not found / Enter video id without quotes",
+            )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -236,8 +201,8 @@ async def get_video_info(video_id: str):
 @app.get("/video/{video_id}/original/")
 async def download_original_video(video_id: str):
     # Generate a pre-signed URL for the original video
-    bucket_name = 'videos'  # Replace with your S3 bucket name
-    object_key = f'{video_id}/video.mp4'  # Modify the object key as needed
+    bucket_name = "videos"  # Replace with your S3 bucket name
+    object_key = f"{video_id}/video.mp4"  # Modify the object key as needed
 
     try:
         # Retrieve the original video file from S3
@@ -245,11 +210,11 @@ async def download_original_video(video_id: str):
 
         # Create a temporary file to save the video content
         with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-            temp_file.write(response['Body'].read())
+            temp_file.write(response["Body"].read())
             temp_file.seek(0)
 
             # Determine the content type and file name
-            content_type = response['ContentType']
+            content_type = response["ContentType"]
             file_name = os.path.basename(object_key)
 
             # Return the video file as a response with appropriate headers
@@ -259,15 +224,17 @@ async def download_original_video(video_id: str):
                 media_type=content_type,
             )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error downloading video: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error downloading video: {str(e)}"
+        )
 
 
 # Download the compressed video using video_id
 @app.get("/video/{video_id}/compressed/")
 async def download_compressed_video(video_id: str):
     # Generate a pre-signed URL for the compressed video
-    bucket_name = 'videos'  # Replace with your S3 bucket name
-    object_key = f'{video_id}/compressed_video.mp4'  # Modify the object key as needed
+    bucket_name = "videos"  # Replace with your S3 bucket name
+    object_key = f"{video_id}/compressed_video.mp4"  # Modify the object key as needed
 
     try:
         # Retrieve the compressed video file from S3
@@ -275,11 +242,11 @@ async def download_compressed_video(video_id: str):
 
         # Create a temporary file to save the video content
         with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-            temp_file.write(response['Body'].read())
+            temp_file.write(response["Body"].read())
             temp_file.seek(0)
 
             # Determine the content type and file name
-            content_type = response['ContentType']
+            content_type = response["ContentType"]
             file_name = os.path.basename(object_key)
 
             # Return the compressed video file as a response with appropriate headers
@@ -289,18 +256,15 @@ async def download_compressed_video(video_id: str):
                 media_type=content_type,
             )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error downloading video: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error downloading video: {str(e)}"
+        )
 
 
 def delete_video_metadata(video_id: str):
     try:
         # Delete the item from DynamoDB based on video_id
-        dynamodb.delete_item(
-            TableName=table_name,
-            Key={
-                'video_id': {'S': video_id}
-            }
-        )
+        dynamodb.delete_item(TableName=table_name, Key={"video_id": {"S": video_id}})
 
         print(f"Video metadata for video_id {video_id} deleted successfully.")
     except ClientError as e:
@@ -312,9 +276,9 @@ def delete_video_metadata(video_id: str):
 @app.delete("/video/{video_id}/")
 async def delete_video(video_id: str):
     # Define your S3 bucket name and object keys for both original and compressed videos
-    bucket_name = 'videos'  # Replace with your S3 bucket name
-    original_video_key = f'{video_id}/video.mp4'
-    compressed_video_key = f'{video_id}/compressed_video.mp4'
+    bucket_name = "videos"  # Replace with your S3 bucket name
+    original_video_key = f"{video_id}/video.mp4"
+    compressed_video_key = f"{video_id}/compressed_video.mp4"
 
     try:
         # Delete the original video from S3
@@ -330,6 +294,7 @@ async def delete_video(video_id: str):
         return {"message": "Video deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting video: {str(e)}")
+
 
 if __name__ == "__main__":
     import uvicorn
