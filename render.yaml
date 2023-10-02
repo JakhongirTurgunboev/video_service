@@ -2,8 +2,9 @@
 
 services:
   - name: fastapi-app
-    dockerfile: Dockerfile  # Assuming your Dockerfile is in the same directory
-    env:  # Environment variables for your FastAPI application
+    type: web
+    dockerfile: Dockerfile
+    env:
       - key: DYNAMODB_ENDPOINT
         value: http://localstack:4566
       - key: S3_ENDPOINT
@@ -15,21 +16,24 @@ services:
         protocol: TCP
 
   - name: celery-worker
-    dockerfile: Dockerfile  # Assuming your Dockerfile is in the same directory
-    env:  # Environment variables for your Celery worker
+    type: worker
+    dockerfile: Dockerfile
+    env:
       - key: REDIS_HOST
         value: redis
 
   - name: redis
+    type: redis
     image: redis:latest
-    env:  # No environment variables needed for Redis
+    env:
     ports:
       - port: 6379
         protocol: TCP
 
   - name: localstack
+    type: web
     image: localstack/localstack
-    env:  # Environment variables for LocalStack
+    env:
       - key: SERVICES
         value: s3,dynamodb
       - key: DEBUG
