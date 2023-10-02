@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from app import main
 
-client = TestClient(main)
+client = TestClient(main.app)
 
 
 @pytest.fixture
